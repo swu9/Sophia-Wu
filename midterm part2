@@ -1,0 +1,128 @@
+library(stringr)
+library(ggplot2)
+#To read the txt file from the folder raw data. I reset the seperation of the file in to .
+#instead of - , otherwise, R won't allow me to input as a data frame.
+theFiles <- dir("raw data/",pattern="\\.txt")
+for (a in theFiles) {
+  nameToUse <- str_sub(string=a,start=1,end=7)
+  temp <- read.csv(file=file.path("raw data",a),skip =2, stringsAsFactors = F)
+  assign(x=nameToUse, value=temp)
+}
+
+L <- rbind(L.00.01,L.00.02,L.00.03,L.00.04,L.00.05,L.00.06,L.00.07,L.00.08,L.00.09,
+            L.00.10,L.00.11,L.00.12,L.01.01,L.01.02,L.01.03,L.01.04,L.01.05,L.01.06,
+            L.01.07,L.01.08,L.01.09,L.01.10,L.01.11,L.01.12,L.02.01,L.02.02,L.02.03,
+            L.02.04,L.02.05,L.02.06,L.02.07,L.02.08,L.02.09,L.02.10,L.02.11,L.02.12,
+            L.03.01,L.03.02,L.03.03,L.03.04,L.03.05,L.03.06,L.03.07,L.03.08,L.03.09,
+            L.03.10,L.03.11,L.03.12,L.04.01,L.04.02,L.04.03,L.04.04,L.04.05,L.04.06,
+            L.04.07,L.04.08,L.04.09,L.04.10,L.04.11,L.04.12)
+class(L)
+L1 <- L[,2:length(L)]
+colnames(L1) <- c(1:24)#name the column from 1:24 for 24 hours
+
+#Clean the data:
+
+#We want to add the total number of precipitation and don't stop when T occurs. 
+#Since T is minor precipitaion, I set it equal to 0, so it won't effect the summation.
+#Since I don't know what ---- and M represent, I set them as negative number so that
+#I can get rid of them when I do simulation.
+#I used to set M and ---- into NAs, but I found out it is too slow,
+#so I decided to set it as a negative value since the precipication cannot be negative.
+L1[L1=="T   "] <- 0 
+L1[L1=="T"] <- 0
+L1[L1=="----"] <- -999
+L1[L1=="M   "] <- -999 
+
+# read as row otherwise it will read as colmn!!!!
+#If I simply use the code as.numeric, the data will be read by colmns instead of by rows.
+#Then it will give us wrong answer.
+#I discussed with Jing Liu and we decided to use transpose function to find the transpose of the data as a matrix
+#and then do the data covertion so that the data will be read correctly.
+raindata <- as.numeric(t(as.matrix(L1))) 
+
+#Simulate the total precipitation
+storm <- function (x) {
+  i = 1
+  while(i < length(x)+1){
+    tmp = 0
+    while((x[i]>= 0) & (i < length(x)+1)){
+      tmp <- tmp+x[i]
+      i= i+1
+    }
+    sum <-c(sum,tmp)
+    if((x[i]<0) & (i < length(x)+1)){
+    i=i+1
+    }
+    
+  }
+  return(sum)
+}
+
+#Clean out all the zeros since T itself provides 0 during summation.
+rain <- storm(raindata)
+rain1 <-as.data.frame(unlist(rain[c(2:length(rain))]))
+rain2 <- rain1[rain1 != 0]
+class(rain2)
+
+#Graph the participation:
+hist(rain2)
+rain3 <- data.frame(rain2)
+ggplot(rain3, aes(x=rain2)) + geom_histogram(aes(y=..density..),binwidth=.19,colour="black", fill="white") +geom_density(alpha=.3613, fill="#FF6666")  
+
+#Conclusion :Since the graph fits the histogram well, it can be shown that the rain gauge data is gamma distributed.
+
+
+#Use MME to calculate the parameter:
+#Calculate the mean and the variace for the precipitation
+mean(rain2)
+var(rain2)
+
+#calculate alpha and lambda
+alpha <- mean(rain2)^2/var(rain2)  
+alpha
+lambda <- mean(rain2)/var(rain2)   
+lambda
+
+
+
+#Use MLE to calculate the parameter :
+
+n <- length(rain2)
+minus.likelihood <- function(theta) {-(n*theta[1]*log(theta[2])-n*lgamma(theta[1])+(theta[1]-1)*sum(log(rain2))-theta[2]*sum(rain2))}
+theta <- c(alpha,lambda)
+minus.likelihood(theta)
+max.likelihood <- nlminb(start=c(0.3613071,1.276204), obj = minus.likelihood)
+max.likelihood$par # the MLE parameters are calculated here
+
+
+
+#I do a little test for the MLE of the parameters:
+aMLE <- max.likelihood$par[1]
+lMLE <- max.likelihood$par[2]
+aMLEboot <- numeric(1000)
+lMLEboot <- numeric(1000)
+len <- length(rain2)
+for(i in c(1:1000)){
+  boot <- sample(rain2, len, replace=TRUE)
+  max.llh <- nlminb(start=c(.3762, 1.6767), obj = minus.likelihood)
+  aMLEboot <- c(aMLEboot, max.llh$par[1])
+  lMLEboot <- c(lMLEboot, max.llh$par[2])
+}
+sd_aMLEboot <- sd(aMLEboot)
+sd_aMLEboot
+sd_lMLEboot <- sd(lMLEboot)
+sd_lMLEboot
+
+#CIs for alpha and lambda
+aMLE.ci.nr <- c(aMLE-2*sd_aMLEboot, aMLE+2*sd_aMLEboot) 
+aMLE.ci.pr <- c(quantile(aMLEboot,.025), quantile(aMLEboot,.975)) 
+aMLE.ci.pv <- c(2*aMLE-quantile(aMLEboot,.975), 2*aMLE-quantile(aMLEboot,.025))
+aMLE.ci.nr
+aMLE.ci.pr
+aMLE.ci.pv
+lMLE.ci.nr <- c(lMLE-2*sd_lMLEboot, lMLE+2*sd_lMLEboot)
+lMLE.ci.pr <- c(quantile(lMLEboot,.025), quantile(lMLEboot,.975))
+lMLE.ci.pv <- c(2*lMLE-quantile(lMLEboot,.975), 2*lMLE-quantile(lMLEboot,.025))
+lMLE.ci.nr
+lMLE.ci.pr
+lMLE.ci.pv
